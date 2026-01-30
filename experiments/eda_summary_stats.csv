@@ -1,0 +1,16 @@
+Metric,Value
+Total Ratings,"1,149,780"
+Unique Users,"105,283"
+Unique Items (Books),"340,553"
+Sparsity (all interactions),99.9968%
+Sparsity (explicit only),99.9970%
+Implicit Ratings (%),62.3%
+Explicit Ratings (%),37.7%
+Avg Ratings per User,10.92
+Avg Ratings per Item,3.38
+Median Ratings per User,1
+Median Ratings per Item,1
+Gini (User Activity),0.842
+Gini (Item Popularity),0.606
+Cold Users (≤5 ratings),"85,566 (81.3%)"
+Cold Items (≤5 ratings),"305,796 (89.8%)"
