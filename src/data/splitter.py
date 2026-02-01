@@ -92,6 +92,102 @@ def filter_data(
 
     return df, filtered_books
 
+def add_random_timestamps(
+    df: pd.DataFrame,
+    start: str = "2004-08-01 00:00:00",
+    end: str = "2004-09-30 23:59:59",
+    seed: int = 42,
+    ts_col: str = "ts",
+) -> pd.DataFrame:
+    """
+    Add a reproducible random timestamp per row, uniform in [start, end].
+    """
+    out = df.copy()
+
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    if end_ts <= start_ts:
+        raise ValueError("end must be after start")
+
+    rng = np.random.default_rng(seed)
+
+    # sample nanoseconds uniformly
+    start_ns = start_ts.value
+    end_ns = end_ts.value
+    rand_ns = rng.integers(low=start_ns, high=end_ns + 1, size=len(out), dtype=np.int64)
+
+    out[ts_col] = pd.to_datetime(rand_ns)
+    return out
+
+@dataclass
+class UserTemporalSplitConfig:
+    train_frac: float = 0.8
+    val_frac: float = 0.1
+    test_frac: float = 0.1
+    min_train: int = 1
+    min_val: int = 1
+    min_test: int = 1
+    min_user_interactions: int = 5   # Users must have at least this many ratings
+    min_item_interactions: int = 5   # Items must have at least this many ratings
+    explicit_only: bool = True 
+
+def per_user_temporal_split(
+    df: pd.DataFrame,
+    config: UserTemporalSplitConfig,
+    user_col: str = "user_id",
+    time_col: str = "timestamp",
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Temporal split per user by ratios using `time_col`.
+    """
+    fracs = np.array([config.train_frac, config.val_frac, config.test_frac], dtype=float)
+    if np.any(fracs < 0) or not np.isclose(fracs.sum(), 1.0):
+        raise ValueError("train_frac + val_frac + test_frac must sum to 1.0 and be non-negative.")
+    if time_col not in df.columns:
+        raise ValueError(f"{time_col} not found in df")
+
+    train_parts, val_parts, test_parts = [], [], []
+
+    for _, g in df.groupby(user_col, sort=False):
+        #g = g.sort_values([time_col, g.index.name or g.index], kind="mergesort")
+        g = g.sort_values(time_col, kind="mergesort")
+        n = len(g)
+
+        # base split by fractions
+        n_train = int(np.floor(config.train_frac * n))
+        n_val = int(np.floor(config.val_frac * n))
+        n_test = n - n_train - n_val
+
+        # enforce mins if feasible
+        mins = np.array([config.min_train, config.min_val, config.min_test], dtype=int)
+        if n >= mins.sum():
+            counts = np.array([n_train, n_val, n_test], dtype=int)
+
+            # boost splits that are below mins by stealing from the largest split(s)
+            deficit = np.maximum(mins - counts, 0)
+            while deficit.sum() > 0:
+                donor = int(np.argmax(counts - mins))  # split with most slack
+                if counts[donor] <= mins[donor]:
+                    break
+                receiver = int(np.argmax(deficit))
+                counts[donor] -= 1
+                counts[receiver] += 1
+                deficit = np.maximum(mins - counts, 0)
+
+            n_train, n_val, n_test = counts.tolist()
+
+        train_parts.append(g.iloc[:n_train])
+        val_parts.append(g.iloc[n_train:n_train + n_val])
+        test_parts.append(g.iloc[n_train + n_val:])
+
+    train_df = pd.concat(train_parts, axis=0) if train_parts else df.iloc[0:0].copy()
+    val_df = pd.concat(val_parts, axis=0) if val_parts else df.iloc[0:0].copy()
+    test_df = pd.concat(test_parts, axis=0) if test_parts else df.iloc[0:0].copy()
+
+    return train_df, val_df, test_df
+
+
+
 
 def temporal_split(
     ratings: pd.DataFrame,
@@ -162,7 +258,8 @@ def ensure_test_users_in_train(
 def create_temporal_split(
     ratings: pd.DataFrame,
     books: pd.DataFrame,
-    config: Optional[SplitConfig] = None
+    temporal_split_type: str,
+    config: Optional[SplitConfig] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """
     Main function to create temporal train/validation/test split.
@@ -178,29 +275,37 @@ def create_temporal_split(
     if config is None:
         config = SplitConfig()
 
-    print("=" * 60)
-    print("CREATING TEMPORAL SPLIT")
-    print("=" * 60)
-    print(f"\nConfiguration:")
-    print(f"  Train: books published <= {config.train_max_year}")
-    print(f"  Validation: books published {config.train_max_year+1}-{config.val_max_year}")
-    print(f"  Test: books published {config.val_max_year+1}-2004")
-    print(f"  Min user interactions: {config.min_user_interactions}")
-    print(f"  Min item interactions: {config.min_item_interactions}")
-    print(f"  Explicit ratings only: {config.explicit_only}")
-
     # Step 1: Filter data
     print(f"\n--- Step 1: Filtering data ---")
     print(f"Original ratings: {len(ratings):,}")
     filtered_ratings, filtered_books = filter_data(ratings, books, config)
 
     # Step 2: Temporal split
-    print(f"\n--- Step 2: Temporal split ---")
-    train_df, val_df, test_df = temporal_split(filtered_ratings, config)
-    print(f"Initial split sizes:")
-    print(f"  Train: {len(train_df):,} ratings")
-    print(f"  Val: {len(val_df):,} ratings")
-    print(f"  Test: {len(test_df):,} ratings")
+    if temporal_split_type == "books":
+        print("=" * 60)
+        print("CREATING TEMPORAL SPLIT")
+        print("=" * 60)
+        print(f"\nConfiguration:")
+        print(f"  Train: books published <= {config.train_max_year}")
+        print(f"  Validation: books published {config.train_max_year+1}-{config.val_max_year}")
+        print(f"  Test: books published {config.val_max_year+1}-2004")
+        print(f"  Min user interactions: {config.min_user_interactions}")
+        print(f"  Min item interactions: {config.min_item_interactions}")
+        print(f"  Explicit ratings only: {config.explicit_only}")
+        print(f"\n--- Step 2: Temporal split (by publication year) ---")
+        train_df, val_df, test_df = temporal_split(filtered_ratings, config)
+        print(f"Initial split sizes:")
+        print(f"  Train: {len(train_df):,} ratings")
+        print(f"  Val: {len(val_df):,} ratings")
+        print(f"  Test: {len(test_df):,} ratings")
+    else:
+        print(f"\n--- Step 2: Temporal split ---")
+        train_df, val_df, test_df = per_user_temporal_split(filtered_ratings, config, "user_id", "timestamp")
+        print(f"Initial split sizes (by user timestamp):")
+        print(f"  Train: {len(train_df):,} ratings")
+        print(f"  Val: {len(val_df):,} ratings")
+        print(f"  Test: {len(test_df):,} ratings")
+
 
     # Step 3: Ensure test users have training history
     print(f"\n--- Step 3: Ensuring test users have training history ---")
