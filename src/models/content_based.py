@@ -257,6 +257,7 @@ class ContentBasedRecommender:
         return np.array([
             self.predict(u, i) for u, i in zip(user_ids, item_ids)
         ])
+        
 
     def recommend(self, user_id, n, exclude_items):
         """
