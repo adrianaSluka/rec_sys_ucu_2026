@@ -164,7 +164,7 @@ class EvaluationPipeline:
     def __init__(
         self,
         k_values: List[int] = [5, 10, 20],
-        relevance_threshold: float = 6.0
+        relevance_threshold: float = 1.0
     ):
         """
         Args:
@@ -204,7 +204,10 @@ class EvaluationPipeline:
         model,
         test_df: pd.DataFrame,
         train_df: pd.DataFrame,
-        n_recommendations: int = 20
+        n_recommendations: int = 20,
+        user2idx = None,
+        idx2item = None,
+        item2idx = None
     ) -> Dict[str, float]:
         """
         Evaluate model on ranking task.
@@ -238,10 +241,77 @@ class EvaluationPipeline:
         for user_id in user_relevant:
             exclude = user_train_items.get(user_id, set())
 
+            if user2idx != None:
+                u_idx = user2idx[user_id]
+                exclude = [item2idx[i] for i in exclude]
+                try:
+                    recs, _ = model.recommend(u_idx, n_recommendations, exclude)
+                    user_recommendations[user_id] = [idx2item[i] for i in recs]
+                except Exception as e:
+                    # Skip users that can't get recommendations
+                    continue
+            else:
+                try:
+                    recs = model.recommend(user_id, n_recommendations, exclude)
+                    user_recommendations[user_id] = recs
+                except Exception as e:
+                    # Skip users that can't get recommendations
+                    continue
+
+        # Evaluate
+        results = self.ranking_evaluator.evaluate_all(
+            user_recommendations,
+            user_relevant,
+            total_items=len(all_items)
+        )
+
+        return results
+    
+    def evaluate_ranking_graph(
+        self,
+        recs_dict,
+        test_df: pd.DataFrame,
+        train_df: pd.DataFrame,
+        n_recommendations: int = 20
+    ) -> Dict[str, float]:
+        """
+        Evaluate model on ranking task.
+
+        For each user in test set:
+        1. Get items they rated highly (relevant items)
+        2. Generate recommendations (excluding training items)
+        3. Compute ranking metrics
+
+        Args:
+            model: Trained model with recommend method
+            test_df: Test data
+            train_df: Training data (to exclude from recommendations)
+            n_recommendations: Number of recommendations to generate
+
+        Returns:
+            Dictionary of ranking metrics
+        """
+        # Get relevant items per user (items rated >= threshold in test)
+        user_relevant = get_relevant_items(test_df, self.relevance_threshold)
+        print("test_df len", len(test_df['user_id'].drop_duplicates()))
+        print(self.relevance_threshold)
+        print("user_relevant len", len(user_relevant))
+
+
+        # Get items each user has in training (to exclude)
+        user_train_items = train_df.groupby('user_id')['isbn'].apply(set).to_dict()
+
+        # Get all items for coverage calculation
+        all_items = set(train_df['isbn'].unique())
+
+        # Generate recommendations for each user
+        user_recommendations = {}
+
+        for user_id in user_relevant:
             try:
-                recs = model.recommend(user_id, n_recommendations, exclude)
-                user_recommendations[user_id] = recs
+                user_recommendations[user_id] = recs_dict[user_id]
             except Exception as e:
+                print("Except")
                 # Skip users that can't get recommendations
                 continue
 
@@ -253,6 +323,69 @@ class EvaluationPipeline:
         )
 
         return results
+    
+    
+    def evaluate_ranking_heuristic(
+        self,
+        recs_ranked,
+        test_df: pd.DataFrame,
+        train_df: pd.DataFrame,
+        n_recommendations: int = 20
+    ) -> Dict[str, float]:
+        """
+        Evaluate model on ranking task.
+
+        For each user in test set:
+        1. Get items they rated highly (relevant items)
+        2. Generate recommendations (excluding training items)
+        3. Compute ranking metrics
+
+        Args:
+            model: Trained model with recommend method
+            test_df: Test data
+            train_df: Training data (to exclude from recommendations)
+            n_recommendations: Number of recommendations to generate
+
+        Returns:
+            Dictionary of ranking metrics
+        """
+        # Get relevant items per user (items rated >= threshold in test)
+        user_relevant = get_relevant_items(test_df, self.relevance_threshold)
+        print("test_df len", len(test_df['user_id'].drop_duplicates()))
+        print(self.relevance_threshold)
+        print("user_relevant len", len(user_relevant))
+
+
+        # Get items each user has in training (to exclude)
+        user_train_items = train_df.groupby('user_id')['isbn'].apply(set).to_dict()
+
+        # Get all items for coverage calculation
+        all_items = set(train_df['isbn'].unique())
+
+        # Generate recommendations for each user
+        user_recommendations = {}
+
+        for user_id in user_relevant:
+            exclude = user_train_items.get(user_id, set())
+            try:
+                recs = [i for i in recs_ranked if i not in exclude][:n_recommendations]
+                user_recommendations[user_id] = recs
+            except Exception as e:
+                print("Except")
+                # Skip users that can't get recommendations
+                continue
+
+        # Evaluate
+        results = self.ranking_evaluator.evaluate_all(
+            user_recommendations,
+            user_relevant,
+            total_items=len(all_items)
+        )
+
+        return results
+    
+    
+
 
     def evaluate_full(
         self,
