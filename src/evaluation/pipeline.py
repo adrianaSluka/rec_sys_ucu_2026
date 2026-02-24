@@ -293,9 +293,7 @@ class EvaluationPipeline:
         """
         # Get relevant items per user (items rated >= threshold in test)
         user_relevant = get_relevant_items(test_df, self.relevance_threshold)
-        print("test_df len", len(test_df['user_id'].drop_duplicates()))
-        print(self.relevance_threshold)
-        print("user_relevant len", len(user_relevant))
+  
 
 
         # Get items each user has in training (to exclude)
@@ -311,7 +309,6 @@ class EvaluationPipeline:
             try:
                 user_recommendations[user_id] = recs_dict[user_id]
             except Exception as e:
-                print("Except")
                 # Skip users that can't get recommendations
                 continue
 
@@ -351,9 +348,6 @@ class EvaluationPipeline:
         """
         # Get relevant items per user (items rated >= threshold in test)
         user_relevant = get_relevant_items(test_df, self.relevance_threshold)
-        print("test_df len", len(test_df['user_id'].drop_duplicates()))
-        print(self.relevance_threshold)
-        print("user_relevant len", len(user_relevant))
 
 
         # Get items each user has in training (to exclude)
@@ -371,7 +365,6 @@ class EvaluationPipeline:
                 recs = [i for i in recs_ranked if i not in exclude][:n_recommendations]
                 user_recommendations[user_id] = recs
             except Exception as e:
-                print("Except")
                 # Skip users that can't get recommendations
                 continue
 

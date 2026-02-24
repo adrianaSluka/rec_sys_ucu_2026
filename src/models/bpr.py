@@ -2,6 +2,10 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
+from src.evaluation import (
+    EvaluationPipeline,
+    print_evaluation_results,
+)
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
@@ -144,13 +148,25 @@ class BPRMF:
         user_pos: List[np.ndarray],
         neg_sampler: NegativeSampler,
         verbose: bool = True,
-    ) -> List[float]:
+        val_df = None, 
+        train_df = None,
+        user2idx = None, 
+        idx2item = None, 
+        item2idx = None
+
+    ):
         """
         user_pos: list length n_users, each an array of positive item indices
         neg_sampler: defines how we sample j from items
         """
         cfg = self.cfg
         losses = []
+        precisions = []
+        hit_rates = []
+        ndcgs = []
+        #!!!!!!relevance_threshold!!!!!!!!
+        pipeline = EvaluationPipeline(k_values=[10], relevance_threshold=1)
+
 
         # users with at least 1 positive
         eligible_users = np.array([u for u in range(self.n_users) if len(user_pos[u]) > 0], dtype=np.int32)
@@ -233,10 +249,19 @@ class BPRMF:
 
             epoch_loss /= n_total
             losses.append(epoch_loss)
+            if val_df is None:
+                continue
+            else: 
+                model_ranking = pipeline.evaluate_ranking(self, val_df, train_df, n_recommendations=10, 
+                                                          user2idx = user2idx, idx2item = idx2item, item2idx = item2idx)
+                ndcgs.append(model_ranking.get('ndcg@10', 0))
+                precisions.append(model_ranking.get('precision@10', 0))
+                hit_rates.append(model_ranking.get('hit_rate@10', 0))
+
             if verbose:
                 print(f"Epoch {epoch+1:02d}/{cfg.n_epochs} | train_bpr_loss={epoch_loss:.5f}")
 
-        return losses
+        return losses, ndcgs, precisions, hit_rates
 
     def recommend(
         self,

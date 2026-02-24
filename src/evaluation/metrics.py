@@ -349,7 +349,6 @@ class RankingEvaluator:
         all_recs_flat = []
 
         users_evaluated = 0
-        print(len(user_relevant))
 
         for user_id in user_relevant:
             if user_id not in user_recommendations:
