@@ -1,6 +1,6 @@
 # Recommender Systems (part 2)
 
-GitHub: https://github.com/adrianaSluka/rec_sys_ucu_2026/tree/adriana/matrix-factorization
+GitHub: https://github.com/adrianaSluka/rec_sys_ucu_2026/
 
 Dataset: **Book Crossing Dataset**
 
