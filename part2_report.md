@@ -13,9 +13,9 @@ Team: Placeholder
 
 For ranking heuristics mix of popularity and recency-based ranking was used: final score is the number of book occurences in train set, weighted with time decay factor
 
-$$
+$
 2^{-\Delta t / h}
-$$
+$
 
 where h is half-life factor and equals 30 days. This way we penalize older ratings and assign more relevance to newer ones.
 
@@ -66,8 +66,6 @@ Best strategy for negative pairs sampling is Uniform, where all entries are trea
 
 Though train loss shows positive convergence dynamics, test NDCG@10, Precision@10 and Hit Rate@10 reach its plateaus at approximately 5th-10th epochs, indicating overfit.
 
-**Impact on head vs tail items.** BPR with uniform negative sampling has the best catalog coverage (0.77) among all models, meaning it exposes a wider range of items including the long tail. Popularity-based negative sampling systematically penalizes popular items, producing anti-popular recommendations and reduced coverage. This confirms that the choice of negative sampling strategy directly controls the head/tail trade-off: uniform sampling is more tail-friendly, while popularity sampling may be used deliberately to surface niche items at the cost of recommendation quality.
-
 ## Hybrid Recommender Systems
 
 Two hybrid strategies were implemented combining FunkSVD (collaborative signal) and Content-Based filtering (content signal):
@@ -82,23 +80,23 @@ with min-max normalization per model before blending to prevent scale dominance.
 
 **Cascade Hybrid** uses a two-stage pipeline: Content-Based generates a candidate pool of 300 items, which FunkSVD then reranks. The rationale is that CB provides recall for less popular items the CF model may miss, while FunkSVD provides personalized precision within that pool.
 
-The dataset used for hybrid experiments was the min-5 filter split: 6,792 users, 8,985 items, with 85,206 train and 17,503 test ratings (temporal 80/10/10 per-user split). Sub-models alone show very limited ranking ability:
+The dataset used for hybrid experiments was the min-10 filter split: 1,810 users, 2,020 items, with 32,310  train and 5,439 test ratings (temporal 80/10/10 per-user split). Sub-models alone show very limited ranking ability:
 
 | Model | NDCG@10 | Precision@10 | Hit Rate@10 |
 |---|---|---|---|
-| FunkSVD | 0.0006 | — | 0.0033 |
-| ContentBased | 0.0148 | — | 0.0416 |
+| FunkSVD | 0.0034 | 0.0020 | 0.0201 |
+| ContentBased | 0.0115 | 0.0045 | 0.0390 |
 
 Combining signals improves ranking substantially:
 
 | Model | RMSE | NDCG@10 | Precision@10 | Hit Rate@10 |
 |---|---|---|---|---|
-| WeightedHybrid (α=0.6) | 1.5481 | **0.0291** | 0.0092 | **0.0832** |
-| CascadeHybrid | 1.5461 | 0.0086 | 0.0033 | 0.0304 |
+| WeightedHybrid (α=0.6) | 1.4686  | **0.0542** | **0.0206** | **0.1705** |
+| CascadeHybrid | **1.4682** | 0.0130 | 0.0063 | 0.0614 |
 
 ![hybrid comparison](experiments/hybrid_comparison.png)
 
-An alpha sweep over α ∈ {0.0, 0.2, 0.4, 0.6, 0.8, 1.0} shows that α=0.6 (60% CF, 40% CB) is optimal for NDCG@10 and Hit Rate@10. Pure CF (α=1.0) collapses to near-zero ranking performance—the known FunkSVD dot-product collapse issue where predictions are dominated by bias terms and become effectively popularity-ranked. Pure CB (α=0.0) is better but still weaker than the blend.
+An alpha sweep over α ∈ {0.0, 0.2, 0.4, 0.6, 0.8, 1.0} shows that α=0.4 (40% CF, 60% CB) is optimal for NDCG@10 and Hit Rate@10. Pure CF (α=1.0) collapses to near-zero ranking performance—the known FunkSVD dot-product collapse issue where predictions are dominated by bias terms and become effectively popularity-ranked. Pure CB (α=0.0) is better but still weaker than the blend.
 
 ![alpha sweep](experiments/hybrid_alpha_sweep.png)
 
@@ -156,7 +154,7 @@ Loss is masked MSE computed only on observed entries (unobserved weight = 0). Hi
 
 **Convergence.**  NeuMF's NDCG@10 improves in early epochs (1–15) then plateaus, similar to BPR overfitting behavior. DAE-CF validation metrics remain flat throughout training, suggesting the reconstruction objective and ranking objective are misaligned: the model learns to reconstruct observed ratings accurately while failing to produce discriminative rankings.
 
-## Online Evaluation: A/B Testing & Bandits
+## Online Evaluation: A/B Testing
 
 Let's imagine that we are building recommendation system for some online book-platform, like Headway app and decide to test new recommender system, which promises to perform better.
 
@@ -192,7 +190,7 @@ For an initial production deployment, **BPR-MF with uniform negative sampling** 
 - Interpretable failure modes (embedding collapse detectable, coverage monitorable)
 - Low computational overhead for retraining on new interaction data
 
-The WeightedHybrid (CF + CB) is a strong candidate for a second iteration once content features are properly validated. It showed the best Hit Rate@10 in the min-5 filter experiments and is the only model that partially addresses the item cold-start problem through the content signal.
+The Weighted Hybrid is a strong candidate for a second iteration once content features are properly validated. It showed the best Hit Rate@10 in the min-10 filter experiments and is the only model that partially addresses the item cold-start problem through the content signal.
 
 ### Iteration Strategy Post-Deployment
 
@@ -204,15 +202,11 @@ The WeightedHybrid (CF + CB) is a strong candidate for a second iteration once c
 
 ### Key Failure Modes to Monitor
 
-**Embedding collapse**: FunkSVD and BPR-MF can degenerate where the dot product becomes dominated by bias terms, producing near-identical rankings for all users. Monitor per-user recommendation overlap: if the top-10 lists for >30% of users are identical, embedding collapse has occurred.
-
 **Popularity concentration**: Track the Gini coefficient of item exposure in recommendations weekly. A rising Gini indicates the model is amplifying popularity bias, suppressing tail items and creating a cold-start feedback loop for new content.
 
 **Cold-start degradation**: Monitor recommendation quality separately for users with <5, 5–20, and >20 interactions. BPR-MF has no content fallback; new users will receive popularity-driven recommendations that may not reflect their preferences.
 
 **Feedback loop**: After each model retrain, compare item exposure distributions before and after. If retraining amplifies exposure concentration, introduce a controlled exploration budget (e.g., 10% of recommendations from a diversity-sampled pool).
-
-**Position bias drift**: If CTR@1 grows while CTR@5–10 stays flat, users are increasingly click-satisficing on the first result. Monitor rank-stratified CTR to ensure recommendations are valuable across the list, not just the top position.
 
 ## Additional note
 
